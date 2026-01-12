@@ -1,0 +1,383 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========================================
+// User Management & Authentication
+// ========================================
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  firstName     String   @map("first_name")
+  lastName      String   @map("last_name")
+  phone         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  roles                  UserRole[]
+  managedAssets          Asset[]                  @relation("AssetManager")
+  assignedAssets         AssetUserAssignment[]
+  statusChanges          AssetStatusHistory[]
+  locationMoves          AssetLocationHistory[]
+  maintenancePerformed   MaintenanceRecord[]      @relation("MaintenancePerformer")
+  assignmentsMade        AssetUserAssignment[]    @relation("AssignmentCreator")
+  auditLogs              AuditLog[]
+  workflowInstances      WorkflowInstance[]
+
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  permissions Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  userRoles UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  roleId    String   @map("role_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@map("user_roles")
+}
+
+// ========================================
+// Office & Location Management
+// ========================================
+
+model Office {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  address     String?
+  contactInfo Json?    @map("contact_info")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  assets                Asset[]
+  rfidReaders           RfidReader[]
+  geofences             Geofence[]
+  assetLocationHistory  AssetLocationHistory[]
+
+  @@map("offices")
+}
+
+model Geofence {
+  id            String   @id @default(uuid())
+  officeId      String   @map("office_id")
+  name          String
+  boundary      String?  // GeoJSON or WKT format
+  radiusMeters  Float?   @map("radius_meters")
+  config        Json?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  office Office @relation(fields: [officeId], references: [id], onDelete: Cascade)
+
+  @@map("geofences")
+}
+
+// ========================================
+// Asset Management
+// ========================================
+
+model AssetType {
+  id                  String   @id @default(uuid())
+  name                String
+  category            String?
+  customFieldsSchema  Json?    @map("custom_fields_schema")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  // Relations
+  assets Asset[]
+
+  @@map("asset_types")
+}
+
+model Asset {
+  id                String    @id @default(uuid())
+  assetCode         String    @unique @map("asset_code")
+  name              String
+  assetTypeId       String    @map("asset_type_id")
+  currentOfficeId   String?   @map("current_office_id")
+  currentUserId     String?   @map("current_user_id")
+  status            String    @default("available")
+  specifications    Json?
+  purchaseValue     Decimal?  @map("purchase_value") @db.Decimal(15, 2)
+  purchaseDate      DateTime? @map("purchase_date")
+  serialNumber      String?   @map("serial_number")
+  rfidTagId         String?   @unique @map("rfid_tag_id")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  assetType             AssetType                @relation(fields: [assetTypeId], references: [id])
+  currentOffice         Office?                  @relation(fields: [currentOfficeId], references: [id])
+  currentUser           User?                    @relation("AssetManager", fields: [currentUserId], references: [id])
+  rfidTag               RfidTag?                 @relation(fields: [rfidTagId], references: [id])
+  statusHistory         AssetStatusHistory[]
+  userAssignments       AssetUserAssignment[]
+  locationHistory       AssetLocationHistory[]
+  maintenanceRecords    MaintenanceRecord[]
+
+  @@index([status])
+  @@index([assetCode])
+  @@map("assets")
+}
+
+model AssetStatusHistory {
+  id         String   @id @default(uuid())
+  assetId    String   @map("asset_id")
+  statusFrom String   @map("status_from")
+  statusTo   String   @map("status_to")
+  changedBy  String   @map("changed_by")
+  reason     String?
+  changedAt  DateTime @default(now()) @map("changed_at")
+
+  // Relations
+  asset Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [changedBy], references: [id])
+
+  @@map("asset_status_history")
+}
+
+model AssetUserAssignment {
+  id             String    @id @default(uuid())
+  assetId        String    @map("asset_id")
+  userId         String    @map("user_id")
+  assignedAt     DateTime  @default(now()) @map("assigned_at")
+  returnedAt     DateTime? @map("returned_at")
+  assignedBy     String    @map("assigned_by")
+  assignmentType String    @default("checkout") @map("assignment_type")
+
+  // Relations
+  asset      Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  user       User  @relation(fields: [userId], references: [id])
+  assignedByUser User  @relation("AssignmentCreator", fields: [assignedBy], references: [id])
+
+  @@map("asset_user_assignments")
+}
+
+model AssetLocationHistory {
+  id       String   @id @default(uuid())
+  assetId  String   @map("asset_id")
+  officeId String   @map("office_id")
+  movedAt  DateTime @default(now()) @map("moved_at")
+  movedBy  String   @map("moved_by")
+  reason   String?
+
+  // Relations
+  asset  Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  office Office @relation(fields: [officeId], references: [id])
+  user   User   @relation(fields: [movedBy], references: [id])
+
+  @@map("asset_location_history")
+}
+
+// ========================================
+// RFID Tracking
+// ========================================
+
+model RfidTag {
+  id        String   @id @default(uuid())
+  epc       String   @unique // Electronic Product Code
+  tid       String?  // Tag ID
+  tagType   String   @map("tag_type")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  asset  Asset?
+  events RfidEvent[]
+
+  @@map("rfid_tags")
+}
+
+model RfidReader {
+  id                 String   @id @default(uuid())
+  readerId           String   @unique @map("reader_id")
+  name               String
+  officeId           String   @map("office_id")
+  locationCoordinates Json?   @map("location_coordinates")
+  config             Json?
+  status             String   @default("inactive")
+  lastSeen           DateTime? @map("last_seen")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  // Relations
+  office Office      @relation(fields: [officeId], references: [id])
+  events RfidEvent[]
+
+  @@map("rfid_readers")
+}
+
+model RfidEvent {
+  id           String   @id @default(uuid())
+  rfidTagId    String   @map("rfid_tag_id")
+  rfidReaderId String   @map("rfid_reader_id")
+  detectedAt   DateTime @default(now()) @map("detected_at")
+  rssi         Int?     // Received Signal Strength Indicator
+  metadata     Json?
+
+  // Relations
+  rfidTag    RfidTag    @relation(fields: [rfidTagId], references: [id])
+  rfidReader RfidReader @relation(fields: [rfidReaderId], references: [id])
+
+  @@index([detectedAt])
+  @@index([rfidTagId])
+  @@map("rfid_events")
+}
+
+// ========================================
+// Maintenance Management
+// ========================================
+
+model MaintenanceRecord {
+  id              String    @id @default(uuid())
+  assetId         String    @map("asset_id")
+  maintenanceType String    @map("maintenance_type")
+  description     String
+  scheduledDate   DateTime? @map("scheduled_date")
+  completedDate   DateTime? @map("completed_date")
+  performedBy     String?   @map("performed_by")
+  cost            Decimal?  @db.Decimal(10, 2)
+  status          String    @default("scheduled")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  asset       Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  performer   User? @relation("MaintenancePerformer", fields: [performedBy], references: [id])
+
+  @@map("maintenance_records")
+}
+
+// ========================================
+// Workflow Management
+// ========================================
+
+model Workflow {
+  id                 String   @id @default(uuid())
+  name               String
+  triggerType        String   @map("trigger_type")
+  workflowDefinition Json     @map("workflow_definition")
+  isActive           Boolean  @default(true) @map("is_active")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  // Relations
+  instances WorkflowInstance[]
+
+  @@map("workflows")
+}
+
+model WorkflowInstance {
+  id         String   @id @default(uuid())
+  workflowId String   @map("workflow_id")
+  triggeredBy String  @map("triggered_by")
+  status     String   @default("running")
+  data       Json?
+  startedAt  DateTime @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  // Relations
+  workflow Workflow         @relation(fields: [workflowId], references: [id])
+  user     User             @relation(fields: [triggeredBy], references: [id])
+  steps    WorkflowStep[]
+
+  @@map("workflow_instances")
+}
+
+model WorkflowStep {
+  id                 String    @id @default(uuid())
+  workflowInstanceId String    @map("workflow_instance_id")
+  stepName           String    @map("step_name")
+  status             String    @default("pending")
+  executedAt         DateTime? @map("executed_at")
+  result             Json?
+
+  // Relations
+  workflowInstance WorkflowInstance @relation(fields: [workflowInstanceId], references: [id], onDelete: Cascade)
+
+  @@map("workflow_steps")
+}
+
+// ========================================
+// Reporting
+// ========================================
+
+model Report {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  reportType  String   @map("report_type")
+  definition  Json
+  isPublic    Boolean  @default(false) @map("is_public")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  schedules ScheduledReport[]
+
+  @@map("reports")
+}
+
+model ScheduledReport {
+  id            String    @id @default(uuid())
+  reportId      String    @map("report_id")
+  schedule      String    // Cron expression
+  recipients    Json      // Array of email addresses
+  format        String    @default("pdf")
+  lastRun       DateTime? @map("last_run")
+  nextRun       DateTime? @map("next_run")
+  isActive      Boolean   @default(true) @map("is_active")
+
+  // Relations
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@map("scheduled_reports")
+}
+
+// ========================================
+// Audit & Compliance
+// ========================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  changes    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
