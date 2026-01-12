@@ -106,21 +106,17 @@ export class RfidExportService {
 
         const csvStringifier = createObjectCsvStringifier({
             header: [
-                { id: 'eventType', title: 'Event Type' },
                 { id: 'tagEpc', title: 'Tag EPC' },
                 { id: 'readerName', title: 'Reader Name' },
                 { id: 'officeName', title: 'Office' },
-                { id: 'signalStrength', title: 'Signal Strength' },
                 { id: 'detectedAt', title: 'Detected At' },
             ],
         });
 
         const records = events.map(event => ({
-            eventType: event.eventType,
             tagEpc: event.rfidTag.epc,
             readerName: event.rfidReader.name,
             officeName: event.rfidReader.office.name,
-            signalStrength: event.signalStrength || '',
             detectedAt: event.detectedAt,
         }));
 
