@@ -461,12 +461,12 @@ export class RfidService {
             failed: [] as Array<{ tagId: string; assetId: string; error: string }>,
         };
 
-        // Process each assignment in a transaction
+        // Process each assignment
         for (const assignment of assignments) {
             try {
                 const { tagId, assetId } = assignment;
 
-                // Verify tag exists and is not already assigned
+                // Verify tag exists
                 const tag = await this.prisma.rfidTag.findUnique({
                     where: { id: tagId },
                 });
@@ -480,7 +480,12 @@ export class RfidService {
                     continue;
                 }
 
-                if (tag.assetId && tag.assetId !== assetId) {
+                // Check if tag is already assigned to a different asset
+                const existingAssignment = await this.prisma.asset.findFirst({
+                    where: { rfidTagId: tagId },
+                });
+
+                if (existingAssignment && existingAssignment.id !== assetId) {
                     results.failed.push({
                         tagId,
                         assetId,
@@ -492,7 +497,7 @@ export class RfidService {
                 // Verify asset exists
                 const asset = await this.prisma.asset.findUnique({
                     where: { id: assetId },
-                    select: { id: true, name: true },
+                    select: { id: true, name: true, rfidTagId: true },
                 });
 
                 if (!asset) {
@@ -504,12 +509,11 @@ export class RfidService {
                     continue;
                 }
 
-                // Assign tag to asset
-                await this.prisma.rfidTag.update({
-                    where: { id: tagId },
+                // Assign tag to asset (update Asset, not RfidTag)
+                await this.prisma.asset.update({
+                    where: { id: assetId },
                     data: {
-                        assetId: assetId,
-                        isActive: true,
+                        rfidTagId: tagId,
                     },
                 });
 

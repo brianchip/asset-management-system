@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import * as csv from 'csv-parser';
+import csv from 'csv-parser';
 import { Readable } from 'stream';
 
 interface ImportTagRow {
@@ -33,9 +33,9 @@ export class RfidImportService {
             const stream = Readable.from([csvContent]);
             stream
                 .pipe(csv())
-                .on('data', (row) => rows.push(row))
+                .on('data', (row: ImportTagRow) => rows.push(row))
                 .on('end', () => resolve())
-                .on('error', (error) => reject(error));
+                .on('error', (error: Error) => reject(error));
         });
 
         // Process each row
